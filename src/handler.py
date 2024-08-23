@@ -1,8 +1,7 @@
 import asyncio
-import requests
-from engine import SGlangEngine, OpenAIRequest
 import runpod
 import os
+from sg_engine import SGlangEngine, OpenAIRequest
 
 # Initialize the engine
 engine = SGlangEngine()
@@ -18,37 +17,21 @@ async def async_handler(job):
     
     if job_input.get("openai_route"):
         openai_route, openai_input = job_input.get("openai_route"), job_input.get("openai_input")
-        openai_request = OpenAIRequest()
-        
-        if openai_route == "/v1/chat/completions":
-            async for chunk in openai_request.request_chat_completions(**openai_input):
-                yield chunk
-        elif openai_route == "/v1/completions":
-            async for chunk in openai_request.request_completions(**openai_input):
-                yield chunk
-        elif openai_route == "/v1/models":
-            models = await openai_request.get_models()
-            yield models
+        async with OpenAIRequest() as openai_request:
+            if openai_route == "/v1/chat/completions":
+                async for chunk in openai_request.request_chat_completions(**openai_input):
+                    yield chunk
+            elif openai_route == "/v1/completions":
+                async for chunk in openai_request.request_completions(**openai_input):
+                    yield chunk
+            elif openai_route == "/v1/models":
+                models = await openai_request.get_models()
+                yield models
     else:
-        generate_url = f"{engine.base_url}/generate"
-        headers = {"Content-Type": "application/json"}
-        generate_data = {
-            "text": job_input.get("prompt", ""),
-            "sampling_params": job_input.get("sampling_params", {})
-        }
-        response = requests.post(generate_url, json=generate_data, headers=headers)
-        if response.status_code == 200:
-            yield response.json()
-        else:
-            yield {"error": f"Generate request failed with status code {response.status_code}", "details": response.text}
+        yield {"error": "Unsupported request type", "details": "Only OpenAI-compatible routes are supported"}
 
-max_concurrency = int(os.getenv("MAX_CONCURRENCY", 100))
-print(f"MAX_CONCURRENCY {max_concurrency}")
+runpod.serverless.start({"handler": async_handler, "return_aggregate_stream": True})
 
-runpod.serverless.start({"handler": async_handler, 
-                         "concurrency_modifier": lambda x: max_concurrency, 
-                         "return_aggregate_stream": True})
-
-# # Ensure the server is shut down when the serverless function is terminated
-# import atexit
-# atexit.register(engine.shutdown)
+# Ensure the server is shut down when the serverless function is terminated
+import atexit
+atexit.register(engine.shutdown)

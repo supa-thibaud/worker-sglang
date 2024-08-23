@@ -1,10 +1,9 @@
 import subprocess
 import time
 import requests
-import openai
 import asyncio
-import aiohttp
 import os
+from openai_async import OpenAIAsync  # Assuming you save the OpenAIAsync class in a file named openai_async.py
 
 class SGlangEngine:
     def __init__(self, model="meta-llama/Meta-Llama-3-8B-Instruct", host="0.0.0.0", port=30000):
@@ -100,52 +99,25 @@ class SGlangEngine:
 
 class OpenAIRequest:
     def __init__(self, base_url="http://0.0.0.0:30000/v1", api_key="EMPTY"):
-        self.client = openai.Client(base_url=base_url, api_key=api_key)
+        self.base_url = base_url
+        self.api_key = api_key
+        self.client = None
+
+    async def __aenter__(self):
+        self.client = OpenAIAsync(base_url=self.base_url, api_key=self.api_key)
+        await self.client.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.client.__aexit__(exc_type, exc, tb)
     
-    async def request_chat_completions(self, model="default", messages=None, max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0):
-        if messages is None:
-            messages = [
-                {"role": "system", "content": "You are a helpful AI assistant"},
-                {"role": "user", "content": "List 3 countries and their capitals."},
-            ]
-        
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            stream=stream,
-            frequency_penalty=frequency_penalty,
-            n=n,
-            stop=stop,
-            temperature=temperature,
-            top_p=top_p
-        )
-        
-        if stream:
-            async for chunk in response:
-                yield chunk.to_dict()
-        else:
-            yield response.to_dict()
+    async def request_chat_completions(self, model="default", messages=None, max_tokens=100, stream=False, **kwargs):
+        async for chunk in self.client.request_chat_completions(model, messages, max_tokens, stream, **kwargs):
+            yield chunk
     
-    async def request_completions(self, model="default", prompt="The capital of France is", max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0):
-        response = self.client.completions.create(
-            model=model,
-            prompt=prompt,
-            max_tokens=max_tokens,
-            stream=stream,
-            frequency_penalty=frequency_penalty,
-            n=n,
-            stop=stop,
-            temperature=temperature,
-            top_p=top_p
-        )
-        
-        if stream:
-            async for chunk in response:
-                yield chunk.to_dict()
-        else:
-            yield response.to_dict()
+    async def request_completions(self, model="default", prompt="The capital of France is", max_tokens=100, stream=False, **kwargs):
+        async for chunk in self.client.request_completions(model, prompt, max_tokens, stream, **kwargs):
+            yield chunk
     
     async def get_models(self):
-        response = await self.client.models.list()
-        return response
+        return await self.client.get_models()
