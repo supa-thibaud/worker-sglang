@@ -97,7 +97,6 @@ class SGlangEngine:
         self.process = subprocess.Popen(command, stdout=None, stderr=None)
         print(f"Server started with PID: {self.process.pid}")
 
-        self.test_concurrency()
         
     async def test_concurrency(self):
         engine = SGlangEngine()
@@ -120,6 +119,7 @@ class SGlangEngine:
                 response = requests.get(f"{self.base_url}/v1/models")
                 if response.status_code == 200:
                     print("Server is ready!")
+                    self.test_concurrency()
                     return True
             except requests.RequestException:
                 pass
