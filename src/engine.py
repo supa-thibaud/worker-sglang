@@ -97,6 +97,22 @@ class SGlangEngine:
         self.process = subprocess.Popen(command, stdout=None, stderr=None)
         print(f"Server started with PID: {self.process.pid}")
 
+        self.test_concurrency()
+        
+    async def test_concurrency():
+        engine = SGlangEngine()
+        
+        # Create a large number of sample inputs
+        test_concurrency = int(os.getenv("TEST_CONCURRENCY", 10))
+        inputs = [{"prompt": f"This is test prompt {i}"} for i in range(test_concurrency)]
+        
+        results = []
+        async for result in engine.generate(inputs):
+            results.append(result)
+            print(f"test_concurrency Received result: {result}")
+        
+        print(f"test_concurrency Processed {len(results)} requests concurrently")
+
     def wait_for_server(self, timeout=300, interval=5):
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -116,45 +132,27 @@ class SGlangEngine:
             self.process.wait() 
             print("Server shut down.")
 
-    async def generate_batch(self, inputs: List[Dict[str, Any]], batch_size: BatchSize) -> AsyncGenerator[List[Dict[str, Any]], None]:
-        async with aiohttp.ClientSession() as session:
-            while inputs:
-                current_batch = inputs[:batch_size.current_size]
-                inputs = inputs[batch_size.current_size:]
+    async def generate(self, job_input: Dict[str, Any] | List[Dict[str, Any]]) -> AsyncGenerator[Dict[str, Any], None]:
+        if not isinstance(job_input, list):
+            job_input = [job_input]
 
-                tasks = [self.generate_single(session, input_data) for input_data in current_batch]
-                batch_results = await asyncio.gather(*tasks)
+        async def process_single_input(input_data: Dict[str, Any]) -> Dict[str, Any]:
+            async with aiohttp.ClientSession() as session:
+                generate_url = f"{self.base_url}/generate"
+                headers = {"Content-Type": "application/json"}
+                generate_data = {
+                    "text": input_data.get("prompt", ""),
+                    "sampling_params": input_data.get("sampling_params", {})
+                }
+                async with session.post(generate_url, json=generate_data, headers=headers) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        return {"error": f"Generate request failed with status code {response.status}", "details": await response.text()}
 
-                yield batch_results
-                batch_size.update()
-
-    async def generate_single(self, session: aiohttp.ClientSession, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        generate_url = f"{self.base_url}/generate"
-        headers = {"Content-Type": "application/json"}
-        generate_data = {
-            "text": input_data.get("prompt", ""),
-            "sampling_params": input_data.get("sampling_params", {})
-        }
-
-        async with session.post(generate_url, json=generate_data, headers=headers) as response:
-            if response.status == 200:
-                return await response.json()
-            else:
-                return {"error": f"Generate request failed with status code {response.status}", "details": await response.text()}
-
-    async def generate(self, job_input: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
-        batch_size = BatchSize(
-            max_size=self.default_batch_size,
-            min_size=self.min_batch_size,
-            growth_factor=self.batch_size_growth_factor
-        )
-
-        if isinstance(job_input, list):
-            async for batch in self.generate_batch(job_input, batch_size):
-                yield batch
-        else:
-            async for batch in self.generate_batch([job_input], batch_size):
-                yield batch[0]
+        tasks = [asyncio.create_task(process_single_input(input_data)) for input_data in job_input]
+        for completed_task in asyncio.as_completed(tasks):
+            yield await completed_task
 
 class OpenAIRequest:
     def __init__(self, base_url="http://0.0.0.0:30000/v1", api_key="EMPTY"):
