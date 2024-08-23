@@ -30,7 +30,13 @@ async def async_handler(job):
     else:
         yield {"error": "Unsupported request type", "details": "Only OpenAI-compatible routes are supported"}
 
-runpod.serverless.start({"handler": async_handler, "return_aggregate_stream": True})
+max_concurrency = int(os.getenv("MAX_CONCURRENCY", 100))
+runpod.serverless.start({
+    "handler": async_handler, 
+    "concurrency_modifier": lambda x: max_concurrency,
+
+    "return_aggregate_stream": True
+    })
 
 # Ensure the server is shut down when the serverless function is terminated
 import atexit
