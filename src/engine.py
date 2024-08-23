@@ -99,12 +99,12 @@ class SGlangEngine:
 
         self.test_concurrency()
         
-    async def test_concurrency():
+    async def test_concurrency(self):
         engine = SGlangEngine()
         
         # Create a large number of sample inputs
-        test_concurrency = int(os.getenv("TEST_CONCURRENCY", 10))
-        inputs = [{"prompt": f"This is test prompt {i}"} for i in range(test_concurrency)]
+        nb_test_concurrency = int(os.getenv("TEST_CONCURRENCY", 10))
+        inputs = [{"prompt": f"This is test prompt {i}"} for i in range(nb_test_concurrency)]
         
         results = []
         async for result in engine.generate(inputs):
