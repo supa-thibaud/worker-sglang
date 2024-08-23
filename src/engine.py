@@ -1,9 +1,24 @@
+import os
 import subprocess
 import time
 import requests
 import asyncio
-import os
-from openai_async import OpenAIAsync  # Assuming you save the OpenAIAsync class in a file named openai_async.py
+import aiohttp
+from typing import List, Dict, Any, AsyncGenerator
+from dataclasses import dataclass
+
+@dataclass
+class BatchSize:
+    max_size: int
+    min_size: int
+    growth_factor: float
+    current_size: int = None
+
+    def __post_init__(self):
+        self.current_size = self.current_size or self.min_size
+
+    def update(self):
+        self.current_size = min(int(self.current_size * self.growth_factor), self.max_size)
 
 class SGlangEngine:
     def __init__(self, model="meta-llama/Meta-Llama-3-8B-Instruct", host="0.0.0.0", port=30000):
@@ -12,7 +27,11 @@ class SGlangEngine:
         self.port = port
         self.base_url = f"http://{host}:{port}"
         self.process = None
-        
+        self.max_concurrency = int(os.getenv("MAX_CONCURRENCY", 100))
+        self.default_batch_size = int(os.getenv("DEFAULT_BATCH_SIZE", 32))
+        self.batch_size_growth_factor = float(os.getenv("BATCH_SIZE_GROWTH_FACTOR", 1.5))
+        self.min_batch_size = int(os.getenv("MIN_BATCH_SIZE", 4))
+
     def start_server(self):
         command = [
             "python3", "-m", "sglang.launch_server",
@@ -77,7 +96,7 @@ class SGlangEngine:
         print(command)
         self.process = subprocess.Popen(command, stdout=None, stderr=None)
         print(f"Server started with PID: {self.process.pid}")
-    
+
     def wait_for_server(self, timeout=300, interval=5):
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -97,27 +116,109 @@ class SGlangEngine:
             self.process.wait() 
             print("Server shut down.")
 
+    async def generate_batch(self, inputs: List[Dict[str, Any]], batch_size: BatchSize) -> AsyncGenerator[List[Dict[str, Any]], None]:
+        async with aiohttp.ClientSession() as session:
+            while inputs:
+                current_batch = inputs[:batch_size.current_size]
+                inputs = inputs[batch_size.current_size:]
+
+                tasks = [self.generate_single(session, input_data) for input_data in current_batch]
+                batch_results = await asyncio.gather(*tasks)
+
+                yield batch_results
+                batch_size.update()
+
+    async def generate_single(self, session: aiohttp.ClientSession, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        generate_url = f"{self.base_url}/generate"
+        headers = {"Content-Type": "application/json"}
+        generate_data = {
+            "text": input_data.get("prompt", ""),
+            "sampling_params": input_data.get("sampling_params", {})
+        }
+
+        async with session.post(generate_url, json=generate_data, headers=headers) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                return {"error": f"Generate request failed with status code {response.status}", "details": await response.text()}
+
+    async def generate(self, job_input: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
+        batch_size = BatchSize(
+            max_size=self.default_batch_size,
+            min_size=self.min_batch_size,
+            growth_factor=self.batch_size_growth_factor
+        )
+
+        if isinstance(job_input, list):
+            async for batch in self.generate_batch(job_input, batch_size):
+                yield batch
+        else:
+            async for batch in self.generate_batch([job_input], batch_size):
+                yield batch[0]
+
 class OpenAIRequest:
     def __init__(self, base_url="http://0.0.0.0:30000/v1", api_key="EMPTY"):
         self.base_url = base_url
         self.api_key = api_key
-        self.client = None
 
-    async def __aenter__(self):
-        self.client = OpenAIAsync(base_url=self.base_url, api_key=self.api_key)
-        await self.client.__aenter__()
-        return self
+    async def request_chat_completions(self, model="default", messages=None, max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0):
+        if messages is None:
+            messages = [
+                {"role": "system", "content": "You are a helpful AI assistant"},
+                {"role": "user", "content": "List 3 countries and their capitals."},
+            ]
+        
+        url = f"{self.base_url}/chat/completions"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        data = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": stream,
+            "frequency_penalty": frequency_penalty,
+            "n": n,
+            "stop": stop,
+            "temperature": temperature,
+            "top_p": top_p
+        }
 
-    async def __aexit__(self, exc_type, exc, tb):
-        await self.client.__aexit__(exc_type, exc, tb)
-    
-    async def request_chat_completions(self, model="default", messages=None, max_tokens=100, stream=False, **kwargs):
-        async for chunk in self.client.request_chat_completions(model, messages, max_tokens, stream, **kwargs):
-            yield chunk
-    
-    async def request_completions(self, model="default", prompt="The capital of France is", max_tokens=100, stream=False, **kwargs):
-        async for chunk in self.client.request_completions(model, prompt, max_tokens, stream, **kwargs):
-            yield chunk
-    
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=data, headers=headers) as response:
+                if stream:
+                    async for line in response.content:
+                        if line:
+                            yield json.loads(line.decode('utf-8').strip('data: '))
+                else:
+                    yield await response.json()
+
+    async def request_completions(self, model="default", prompt="The capital of France is", max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0):
+        url = f"{self.base_url}/completions"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        data = {
+            "model": model,
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+            "stream": stream,
+            "frequency_penalty": frequency_penalty,
+            "n": n,
+            "stop": stop,
+            "temperature": temperature,
+            "top_p": top_p
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=data, headers=headers) as response:
+                if stream:
+                    async for line in response.content:
+                        if line:
+                            yield json.loads(line.decode('utf-8').strip('data: '))
+                else:
+                    yield await response.json()
+
     async def get_models(self):
-        return await self.client.get_models()
+        url = f"{self.base_url}/models"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                return await response.json()
