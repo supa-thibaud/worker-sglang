@@ -24,7 +24,7 @@ async def async_handler(job):
             elif openai_route == "/v1/completions":
                 async for chunk in openai_request.request_completions(**openai_input):
                     yield chunk
-            elif openai_route == "/v1/models":
+            elif openai_route == "/v1/models": 
                 models = await openai_request.get_models()
                 yield models
     else:
