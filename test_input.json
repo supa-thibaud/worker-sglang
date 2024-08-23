@@ -1,0 +1,14 @@
+{
+     "input": {
+       "openai_route": "/v1/chat/completions",
+       "openai_input": {
+         "model": "default",
+         "messages": [
+           {"role": "system", "content": "You are a helpful assistant."},
+           {"role": "user", "content": "What is the capital of France?"}
+         ],
+         "max_tokens": 50
+       }
+     }
+   }
+   
