@@ -1,7 +1,7 @@
 import asyncio
 import runpod
 import os
-from sg_engine import SGlangEngine, OpenAIRequest
+from engine import SGlangEngine, OpenAIRequest
 
 # Initialize the engine
 engine = SGlangEngine()
