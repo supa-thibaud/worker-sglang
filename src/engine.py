@@ -89,7 +89,7 @@ class SGlangEngine:
                     return True
             except requests.RequestException:
                 pass
-            time.sleep(interval)
+            time.sleep(interval) 
         raise TimeoutError("Server failed to start within the timeout period.")
 
     def shutdown(self):
@@ -102,7 +102,7 @@ class OpenAIRequest:
     def __init__(self, base_url="http://0.0.0.0:30000/v1", api_key="EMPTY"):
         self.client = openai.Client(base_url=base_url, api_key=api_key)
     
-    async def request_chat_completions(self, model="default", messages=None, max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0):
+    async def request_chat_completions(self, model="default", messages=None, max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0, dry_multiplier=0, dry_base=1.75, dry_allowed_length=2, dry_penalty_last_n=0, dry_sequence_breakers='"\\n", ":", "\\"", "*"'):
         if messages is None:
             messages = [
                 {"role": "system", "content": "You are a helpful AI assistant"},
@@ -118,7 +118,12 @@ class OpenAIRequest:
             n=n,
             stop=stop,
             temperature=temperature,
-            top_p=top_p
+            top_p=top_p,
+            dry_multiplier=dry_multiplier,
+            dry_base=dry_base,
+            dry_allowed_length=dry_allowed_length,
+            dry_penalty_last_n=dry_penalty_last_n,
+            dry_sequence_breakers=dry_sequence_breakers,
         )
         
         if stream:
@@ -127,7 +132,7 @@ class OpenAIRequest:
         else:
             yield response.to_dict()
     
-    async def request_completions(self, model="default", prompt="The capital of France is", max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0):
+    async def request_completions(self, model="default", prompt="The capital of France is", max_tokens=100, stream=False, frequency_penalty=0.0, n=1, stop=None, temperature=1.0, top_p=1.0, dry_multiplier=0, dry_base=1.75, dry_allowed_length=2, dry_penalty_last_n=0, dry_sequence_breakers='"\\n", ":", "\\"", "*"'):
         response = self.client.completions.create(
             model=model,
             prompt=prompt,
@@ -137,7 +142,12 @@ class OpenAIRequest:
             n=n,
             stop=stop,
             temperature=temperature,
-            top_p=top_p
+            top_p=top_p,
+            dry_multiplier=dry_multiplier,
+            dry_base=dry_base,
+            dry_allowed_length=dry_allowed_length,
+            dry_penalty_last_n=dry_penalty_last_n,
+            dry_sequence_breakers=dry_sequence_breakers,
         )
         
         if stream:
