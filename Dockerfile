@@ -23,7 +23,7 @@ WORKDIR /sgl-workspace
 
 RUN python3 -m pip install --upgrade pip setuptools wheel html5lib six \
     && git clone --depth=1 https://github.com/supa-thibaud/sglang-dry.git \
-    && cd sglang \
+    && cd sglang-dry \
     && if [ "$BUILD_TYPE" = "srt" ]; then \
          python3 -m pip --no-cache-dir install -e "python[srt]"; \
        else \
